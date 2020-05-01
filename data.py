@@ -12,6 +12,7 @@ if __name__ == "__main__":
 	parser.add_argument("--input", default = '/media/arjun/My Passport/Oxford_dataset/stereo/centre/', help = "Path of the images")
 	parser.add_argument("--model", default = './model', help = "Path of the images")
 	parser.add_argument("--output", default= './data/', help = "Path of output directory")
+	parser.add_argument("--count", type = int, default = 100, help = "Number of images to be saved")
 	Flags = parser.parse_args()
 
 	if not os.path.exists(Flags.output):
@@ -26,6 +27,6 @@ if __name__ == "__main__":
 		fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 		undistorted_image = UndistortImage(color_image, LUT)
 
-		if count < 100:
+		if count < Flags.count:
 			filename = os.path.join(Flags.output, img.split('/')[-1])
 			cv2.imwrite(filename, undistorted_image)
