@@ -68,7 +68,7 @@ def find_features(img1, img2):
 
 	# kp2 = orb.detect(img2, None)
 	# kp2, des2 = orb.compute(img2, kp2)
-	
+
 	# bf=cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 	# matches=bf.match(des1,des2)
 	# img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
@@ -112,6 +112,7 @@ def drawlines(img1, img2, lines, pts1, pts2):
         img1 = cv2.circle(img1,tuple(pt1),5,color,-1)
         img2 = cv2.circle(img2,tuple(pt2),5,color,-1)
     cv2.imshow("img1", img1)
+    cv2.imwrite("./report_images/removing_car.png", img1)
     cv2.imshow("img2", img2)
     cv2.waitKey(0)
     # return img1,img2
@@ -119,13 +120,69 @@ def drawlines(img1, img2, lines, pts1, pts2):
 def find_essential_matrix(intr, F):
 	E = np.matmul(intr.T,np.matmul(F,intr))
 	U, S, Vh = np.linalg.svd(E)
-	W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
-	C = U[:,2]
-	R = np.matmul(U, np.matmul(W, Vh))
-	if np.linalg.det(R) > 0:
-		return R, C
-	else:
-		return -R, -C
+	S[-1] = 0
+	E = np.diag(S)
+	E = np.matmul(U, np.matmul(S, Vh))
+
+	return E
+	# W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+	# C = U[:,2]
+	# R = np.matmul(U, np.matmul(W, Vh))
+	# if np.linalg.det(R) > 0:
+	# 	return R, C
+	# else:
+	# 	return -R, -C
+
+def multiply_three(a, b, c):
+
+	return np.matmul(a, np.matmul(b, c))
+
+def estimate_camera_pose(E):
+
+	poses = []
+	U, S, Vh = np.linalg.svd(E, full_matrices = True)
+	W = np.array([[0,-1,0],[1,0,0],[0,0,1]])
+	U3 = U[:,2]
+	U3 = np.reshape(U3, (3,1))
+
+	C1 = U3.copy()
+	R1 = multiply_three(U, W, Vh)
+
+	if np.linalg.det(R1) < 0:
+		R1 = -R1
+		C1 = -C1
+
+	poses.append(np.hstack((R1, C1)))
+
+	C2 = -U3.copy()
+	R2 = multiply_three(U, W, Vh)
+
+	if np.linalg.det(R2) < 0:
+		R2 = -R2
+		C2 = -C2
+
+	poses.append(np.hstack((R2, C2)))
+	
+	C3 = U3.copy()
+	R3 = multiply_three(U, W.T, Vh)
+
+	if np.linalg.det(R3) < 0:
+		R3 = -R3
+		C3 = -C3
+
+	poses.append(np.hstack((R3, C3)))
+	
+	C4 = -U3.copy()
+	R4 = multiply_three(U, W.T, Vh)
+
+	if np.linalg.det(R4) < 0:
+		R4 = -R4
+		C4 = -C4
+
+	poses.append(np.hstack((R4, C4)))
+
+	return poses
+
 
 def fundamental_matrix_ransac(img1_points, img2_points):
 
@@ -167,8 +224,8 @@ if __name__ == '__main__':
 
 	img1 = cv2.imread('./data/1399381497885112.png', 0)
 	img2 = cv2.imread('./data/1399381498322587.png', 0)
-	img1_feat = img1[:756, :]
-	img2_feat = img2[:756, :]
+	img1_feat = img1[:756,:]
+	img2_feat = img2[:756,:]
 
 	fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 
@@ -187,5 +244,5 @@ if __name__ == '__main__':
 	drawlines(img1, img2, lines2, img1_points, img2_points)
 	intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 	# print(intrinsic)
-	rotation, translation = find_essential_matrix(intrinsic, F)
-	print(rotation, translation)
+	E = find_essential_matrix(intrinsic, F)
+	poses = estimate_camera_pose(E)
