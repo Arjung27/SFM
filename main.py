@@ -22,25 +22,58 @@ def find_f(img1_pts, img2_pts):
 				[img1_pts[6,0]*img2_pts[6,0], img1_pts[6,0]*img2_pts[6,1], img1_pts[6,0], img1_pts[6,1]*img2_pts[6,0], img1_pts[6,1]*img2_pts[6,1], img1_pts[6,1], \
 				img2_pts[6,0], img2_pts[6,1], 1],\
 				[img1_pts[7,0]*img2_pts[7,0], img1_pts[7,0]*img2_pts[7,1], img1_pts[7,0], img1_pts[7,1]*img2_pts[7,0], img1_pts[7,1]*img2_pts[7,1], img1_pts[7,1], \
-				img2_pts[7,0], img2_pts[7,1], 1]])
-	# print(M)			
+				img2_pts[7,0], img2_pts[7,1], 1]])			
+	
 	U, S, Vh = np.linalg.svd(M, full_matrices=True)
-	# print(S)
 	S[-1] = 0
-	# M_ = np.
 	S = np.diag(S)
 	z = np.zeros((8,1))
 	S = np.hstack((S,z))
 	M_ = np.matmul(U,np.matmul(S,Vh))
-	# print(M_)
 	U, S, Vh = np.linalg.svd(M, full_matrices=True)
-	# print(type(Vh))
 	f = Vh[8,:]
-	# print(f)
 	f = f.reshape(3,3)
 	f = f/f[2,2]
-	# print(f)
+
 	return f
+
+def find_features_orb(img1, img2):
+
+	orb = cv2.ORB_create(nfeatures=2000)
+	kp1 = orb.detect(img1, None)
+	kp1, des1 = orb.compute(img1, kp1)
+
+	kp2 = orb.detect(img2, None)
+	kp2, des2 = orb.compute(img2, kp2)
+
+	bf=cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+	matches=bf.match(des1,des2)
+	img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
+	img2 = cv2.cvtColor(img2, cv2.COLOR_GRAY2BGR)
+	matches = sorted(matches, key = lambda x:x.distance)
+
+	for mat in matches[:50]:
+
+		# Get the matching keypoints for each of the images
+		img1_idx = mat.queryIdx
+		img2_idx = mat.trainIdx
+
+		# x - columns
+		# y - rows
+		# Get the coordinates
+		[x1,y1] = kp1[img1_idx].pt
+		[x2,y2] = kp2[img2_idx].pt
+
+		cv2.circle(img1, tuple([int(x1), int(y1)]), 10, (0, 255, 0))
+		cv2.circle(img2, tuple([int(x2), int(y2)]), 10, (0, 255, 0))
+		img1_points.append([int(x1), int(y1)])
+		img2_points.append([int(x2), int(y2)])
+
+	# img3 = cv2.drawMatches(img1,kp1,img2,kp2,matches[:10],None)
+	# cv2.imshow("img1", img3)
+	# cv2.waitKey(0)
+
+	return np.asarray(img1_points), np.asarray(img2_points)
 
 def find_features(img1, img2):
 
@@ -61,40 +94,6 @@ def find_features(img1, img2):
 			img1_points.append([int(x1), int(y1)])
 			img2_points.append([int(x2), int(y2)])
 			good.append([m1])
-	
-	# orb = cv2.ORB_create(nfeatures=2000)
-	# kp1 = orb.detect(img1, None)
-	# kp1, des1 = orb.compute(img1, kp1)
-
-	# kp2 = orb.detect(img2, None)
-	# kp2, des2 = orb.compute(img2, kp2)
-
-	# bf=cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-	# matches=bf.match(des1,des2)
-	# img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
-	# img2 = cv2.cvtColor(img2, cv2.COLOR_GRAY2BGR)
-	# matches = sorted(matches, key = lambda x:x.distance)
-
-	# for mat in matches[:50]:
-
-	# 	# Get the matching keypoints for each of the images
-	# 	img1_idx = mat.queryIdx
-	# 	img2_idx = mat.trainIdx
-
-	# 	# x - columns
-	# 	# y - rows
-	# 	# Get the coordinates
-	# 	[x1,y1] = kp1[img1_idx].pt
-	# 	[x2,y2] = kp2[img2_idx].pt
-
-	# 	cv2.circle(img1, tuple([int(x1), int(y1)]), 10, (0, 255, 0))
-	# 	cv2.circle(img2, tuple([int(x2), int(y2)]), 10, (0, 255, 0))
-	# 	img1_points.append([int(x1), int(y1)])
-	# 	img2_points.append([int(x2), int(y2)])
-
-	# img3 = cv2.drawMatches(img1,kp1,img2,kp2,matches[:10],None)
-	# cv2.imshow("img1", img3)
-	# cv2.waitKey(0)
 
 	return np.asarray(img1_points), np.asarray(img2_points)
 
@@ -111,31 +110,67 @@ def drawlines(img1, img2, lines, pts1, pts2):
         img1 = cv2.line(img1, (x0,y0), (x1,y1), color,1)
         img1 = cv2.circle(img1,tuple(pt1),5,color,-1)
         img2 = cv2.circle(img2,tuple(pt2),5,color,-1)
-    cv2.imshow("img1", img1)
-    cv2.imwrite("./report_images/removing_car.png", img1)
-    cv2.imshow("img2", img2)
-    cv2.waitKey(0)
+    # cv2.imshow("img1", img1)
+    # cv2.imwrite("./report_images/removing_car.png", img1)
+    # cv2.imshow("img2", img2)
+    # cv2.waitKey(0)
     # return img1,img2
 
 def find_essential_matrix(intr, F):
 	E = np.matmul(intr.T,np.matmul(F,intr))
 	U, S, Vh = np.linalg.svd(E)
 	S[-1] = 0
-	E = np.diag(S)
+	S = np.diag(S)
 	E = np.matmul(U, np.matmul(S, Vh))
 
 	return E
-	# W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
-	# C = U[:,2]
-	# R = np.matmul(U, np.matmul(W, Vh))
-	# if np.linalg.det(R) > 0:
-	# 	return R, C
-	# else:
-	# 	return -R, -C
 
 def multiply_three(a, b, c):
 
 	return np.matmul(a, np.matmul(b, c))
+
+def disambiguate_camera_pose(poses, world_points):
+
+	count = np.zeros((4,1))
+
+	for j in range(len(poses)):
+		pose = poses[j]
+		points = world_points[:3, :, j]
+		r3 = pose[2, :3]
+		C = np.reshape(pose[:, 3], (3,1))
+		result = np.matmul(r3, (points - C))
+		inds = np.where(result > 0)
+		count[j] = len(inds[0])
+
+	return np.argmax(count)
+
+
+def linear_triangulation(poses, pts1, pts2):
+
+	world = np.array([[1, 0, 0, 0],
+					  [0, 1, 0, 0],
+					  [0, 0, 1, 0]], dtype = np.float32)
+
+	world_points = np.zeros((4, pts1.shape[0], len(poses)))
+
+	for j in range(len(poses)):
+		for i in range(pts1.shape[0]):
+
+			x1 = pts1[i][0]
+			y1 = pts1[i][1]
+			x2 = pts2[i][0]
+			y2 = pts2[i][1]
+
+			M = np.array([y1*world[2] - world[1],
+						  world[0] - x1*world[2],
+						  y2*poses[j][2] - poses[j][1],
+						  poses[j][0] - x2*poses[j][2]])
+
+
+			U, S, Vh = np.linalg.svd(M, full_matrices = True)
+			world_points[:, i, j] = Vh[-1]/Vh[-1][-1]
+
+	return world_points
 
 def estimate_camera_pose(E):
 
@@ -208,7 +243,7 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 		if np.abs(np.sum(error)) < min_error:
 			min_error = np.abs(np.sum(error))
 			best_F = F
-			print(min_error)
+			# print(min_error)
 
 		max_iter += 1
 
@@ -233,7 +268,7 @@ if __name__ == '__main__':
 	F = fundamental_matrix_ransac(img1_points, img2_points)
 
 	F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
-	print(F, F_)
+	# print(F, F_)
 
 	lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F)
 	lines1 = lines1.reshape(-1,3)
@@ -246,3 +281,5 @@ if __name__ == '__main__':
 	# print(intrinsic)
 	E = find_essential_matrix(intrinsic, F)
 	poses = estimate_camera_pose(E)
+	world_points = linear_triangulation(poses, img1_points, img2_points)
+	camera_pose_idx = disambiguate_camera_pose(poses, world_points)
