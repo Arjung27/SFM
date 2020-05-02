@@ -49,6 +49,9 @@ def find_essential_matrix(intr, F):
 		return R, C
 	else:
 		return -R, -C	
+
+def plot_3d(R,)
+
 	
 
 
@@ -103,5 +106,5 @@ if __name__ == '__main__':
 		exit(0)
 		
 	fx, fy, cx, cy = 0.1, 0.2, 23, 25	
-	intrinsic = np.array([[0.1, 0, 23], [0, 0.2, 25], [0, 0, 1]])
+	intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
 	E = find_essential_matrix(intrinsic, F)
