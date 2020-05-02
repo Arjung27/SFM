@@ -38,6 +38,17 @@ def find_f(img1_pts, img2_pts):
 	f = f.reshape(3,3)
 	# print(f)
 	return f	
+
+def find_essential_matrix(intr, F):
+	E = np.matmul(intr.T,np.matmul(F,intr))
+	U, S, Vh = np.linalg.svd(E)
+	W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+	C = U(:,3)
+	R = np.matmul(U, np.matmul(W, Vh))
+	if np.linalg.det(R) > 0:
+		return R, C
+	else:
+		return -R, -C	
 	
 
 
@@ -91,3 +102,6 @@ if __name__ == '__main__':
 		F = find_f(eightpts1, eightpts2)
 		exit(0)
 		
+	fx, fy, cx, cy = 0.1, 0.2, 23, 25	
+	intrinsic = np.array([[0.1, 0, 23], [0, 0.2, 25], [0, 0, 1]])
+	E = find_essential_matrix(intrinsic, F)
