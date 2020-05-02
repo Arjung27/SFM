@@ -142,18 +142,35 @@ def disambiguate_camera_pose(poses, world_points):
 		inds = np.where(result > 0)
 		count[j] = len(inds[0])
 
-	return np.argmax(count)
+	if np.max(count) > 0:
+		return np.argmax(count)
+	else:
+		return -1
+
+def homogenous_matrix(mat):
+
+	T = mat[:,-1, np.newaxis]
+	R = mat[:, :3]
+	T = np.matmul(R, T)
+	mat = np.hstack((R, T))
+
+	return mat
 
 
-def linear_triangulation(poses, pts1, pts2):
+def linear_triangulation(intrinsic, poses, pts1, pts2):
 
 	world = np.array([[1, 0, 0, 0],
 					  [0, 1, 0, 0],
 					  [0, 0, 1, 0]], dtype = np.float32)
 
+	world = np.matmul(intrinsic, world)
+	world = homogenous_matrix(world)
+
 	world_points = np.zeros((4, pts1.shape[0], len(poses)))
 
 	for j in range(len(poses)):
+		pose = np.matmul(intrinsic, poses[j])
+		pose = homogenous_matrix(pose)
 		for i in range(pts1.shape[0]):
 
 			x1 = pts1[i][0]
@@ -163,8 +180,8 @@ def linear_triangulation(poses, pts1, pts2):
 
 			M = np.array([y1*world[2] - world[1],
 						  world[0] - x1*world[2],
-						  y2*poses[j][2] - poses[j][1],
-						  poses[j][0] - x2*poses[j][2]])
+						  y2*pose[2] - pose[1],
+						  pose[0] - x2*pose[2]])
 
 
 			U, S, Vh = np.linalg.svd(M, full_matrices = True)
@@ -257,6 +274,10 @@ if __name__ == '__main__':
 	parser.add_argument("--model", default = './model', help = "Path of the images")
 	Flags = parser.parse_args()
 
+	correct_pose = np.array([[1, 0, 0, 0],
+				  [0, 1, 0, 0],
+				  [0, 0, 1, 0]], dtype = np.float32)
+
 	img1 = cv2.imread('./data/1399381497885112.png', 0)
 	img2 = cv2.imread('./data/1399381498322587.png', 0)
 	img1_feat = img1[:756,:]
@@ -281,5 +302,11 @@ if __name__ == '__main__':
 	# print(intrinsic)
 	E = find_essential_matrix(intrinsic, F)
 	poses = estimate_camera_pose(E)
-	world_points = linear_triangulation(poses, img1_points, img2_points)
+	world_points = linear_triangulation(intrinsic, poses, img1_points, img2_points)
 	camera_pose_idx = disambiguate_camera_pose(poses, world_points)
+
+	if camera_pose_idx >= 0:
+		correct_pose = poses[camera_pose_idx]
+		correct_pose = homogenous_matrix(correct_pose)
+		
+
