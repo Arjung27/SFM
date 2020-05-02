@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 import os
+import argparse
+from ReadCameraModel import *
 
 def find_f(img1_pts, img2_pts):
 
@@ -36,6 +38,7 @@ def find_f(img1_pts, img2_pts):
 	f = Vh[8,:]
 	# print(f)
 	f = f.reshape(3,3)
+	f = f/f[2,2]
 	# print(f)
 	return f
 
@@ -50,16 +53,50 @@ def find_features(img1, img2):
 	img1_points = []
 	img2_points = []
 	for m1, m2 in matches:
-		if m1.distance < 0.75 * m2.distance:
+		if m1.distance < 0.7 * m2.distance:
 			im1_idx = m1.queryIdx
 			im2_idx = m1.trainIdx
 			[x1,y1] = kp1[im1_idx].pt
 			[x2,y2] = kp2[im2_idx].pt
 			img1_points.append([int(x1), int(y1)])
-			img2_points.append([int(x2), int(y1)])
+			img2_points.append([int(x2), int(y2)])
 			good.append([m1])
+	
+	# orb = cv2.ORB_create(nfeatures=2000)
+	# kp1 = orb.detect(img1, None)
+	# kp1, des1 = orb.compute(img1, kp1)
 
-	return np.asarray(img1_points), np.asarray(img2_points), good
+	# kp2 = orb.detect(img2, None)
+	# kp2, des2 = orb.compute(img2, kp2)
+	
+	# bf=cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+	# matches=bf.match(des1,des2)
+	# img1 = cv2.cvtColor(img1, cv2.COLOR_GRAY2BGR)
+	# img2 = cv2.cvtColor(img2, cv2.COLOR_GRAY2BGR)
+	# matches = sorted(matches, key = lambda x:x.distance)
+
+	# for mat in matches[:50]:
+
+	# 	# Get the matching keypoints for each of the images
+	# 	img1_idx = mat.queryIdx
+	# 	img2_idx = mat.trainIdx
+
+	# 	# x - columns
+	# 	# y - rows
+	# 	# Get the coordinates
+	# 	[x1,y1] = kp1[img1_idx].pt
+	# 	[x2,y2] = kp2[img2_idx].pt
+
+	# 	cv2.circle(img1, tuple([int(x1), int(y1)]), 10, (0, 255, 0))
+	# 	cv2.circle(img2, tuple([int(x2), int(y2)]), 10, (0, 255, 0))
+	# 	img1_points.append([int(x1), int(y1)])
+	# 	img2_points.append([int(x2), int(y2)])
+
+	# img3 = cv2.drawMatches(img1,kp1,img2,kp2,matches[:10],None)
+	# cv2.imshow("img1", img3)
+	# cv2.waitKey(0)
+
+	return np.asarray(img1_points), np.asarray(img2_points)
 
 def drawlines(img1, img2, lines, pts1, pts2):
     ''' img1 - image on which we draw the epilines for the points in img2
@@ -79,19 +116,31 @@ def drawlines(img1, img2, lines, pts1, pts2):
     cv2.waitKey(0)
     # return img1,img2
 
+def find_essential_matrix(intr, F):
+	E = np.matmul(intr.T,np.matmul(F,intr))
+	U, S, Vh = np.linalg.svd(E)
+	W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+	C = U[:,2]
+	R = np.matmul(U, np.matmul(W, Vh))
+	if np.linalg.det(R) > 0:
+		return R, C
+	else:
+		return -R, -C
+
 def fundamental_matrix_ransac(img1_points, img2_points):
 
-	max_iter = 1000
+	max_iter = 4000
 	threshold = 60
+	diff = np.array([[643.788025, 484.40799]])
 	pts1 = img1_points.copy()
 	pts2 = img2_points.copy()
 	ones = np.ones((img1_points.shape[0], 1))
-	print(img1_points.shape, pts1.shape)
 	pts1 = np.hstack((pts1, ones))
 	pts2 = np.hstack((pts2, ones))
 	all_index = np.arange(0, img1_points.shape[0])
 	min_error = 10000000
 	best_F = []
+	np.random.seed(40)
 
 	for i in range(max_iter):
 
@@ -111,12 +160,32 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 
 if __name__ == '__main__':
 
+	parser = argparse.ArgumentParser()
+	parser.add_argument("--input", default = '/media/arjun/My Passport/Oxford_dataset/stereo/centre/', help = "Path of the images")
+	parser.add_argument("--model", default = './model', help = "Path of the images")
+	Flags = parser.parse_args()
+
 	img1 = cv2.imread('./data/1399381497885112.png', 0)
 	img2 = cv2.imread('./data/1399381498322587.png', 0)
+	img1_feat = img1[:756, :]
+	img2_feat = img2[:756, :]
 
-	img1_points, img2_points, good = find_features(img1, img2)
+	fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
+
+	img1_points, img2_points = find_features(img1_feat, img2_feat)
 	F = fundamental_matrix_ransac(img1_points, img2_points)
 
-	lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2,F)
+	F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
+	print(F, F_)
+
+	lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F)
 	lines1 = lines1.reshape(-1,3)
-	drawlines(img1, img2, lines1, img1_points, img2_points)
+
+	lines2 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F_)
+	lines2 = lines1.reshape(-1,3)
+	drawlines(img1.copy(), img2.copy(), lines1, img1_points, img2_points)
+	drawlines(img1, img2, lines2, img1_points, img2_points)
+	intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+	# print(intrinsic)
+	rotation, translation = find_essential_matrix(intrinsic, F)
+	print(rotation, translation)
