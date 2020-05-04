@@ -6,6 +6,7 @@ import glob
 import math
 import matplotlib.pyplot as plt
 from ReadCameraModel import *
+from UndistortImage import *
 
 def rotationMatrixToEulerAngles(R) :
  
@@ -191,6 +192,7 @@ def linear_triangulation(world, intrinsic, poses, pts1, pts2):
 	for j in range(len(poses)):
 
 		pose = homogenous_matrix(poses[j])
+		# pose = np.matmul(intrinsic, pose)
 
 		for i in range(pts1.shape[0]):
 
@@ -207,7 +209,7 @@ def linear_triangulation(world, intrinsic, poses, pts1, pts2):
 				M = np.vstack((pose1, pose2))
 				# M = np.vstack((world, pose))
 				U, S, Vh = np.linalg.svd(M, full_matrices = True)
-				world_points[:, i, j] = Vh[-1]/Vh[-1][-1]
+				world_points[:, i, j] = Vh[-1]/Vh[-1][3]
 
 	return world_points
 
@@ -273,6 +275,7 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 	best_F = []
 	np.random.seed(40)
 
+	# while (min_inliers/img1_points.shape[0]) < 0.2:
 	for i in range(max_iter):
 
 		index = np.random.choice(all_index, 8, replace=False)
@@ -283,14 +286,22 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 		if len(inds[0]) > min_inliers:
 			min_inliers = len(inds[0])
 			best_F = F
+			inliers1 = img1_points[inds[0]]
+			inliers2 = img2_points[inds[0]]
+			# print(min_inliers/img1_points.shape[0])
+			
 
-	return best_F
+		# if min_inliers/img1_points.shape[0] > 0.99:
+		# 	break
+	# print(min_inliers/img1_points.shape[0])
+
+	return best_F, inliers1, inliers2
 
 
 if __name__ == '__main__':
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--input", default = '/media/arjun/My Passport/Oxford_dataset/stereo/centre/', help = "Path of the images")
+	parser.add_argument("--input", default = '/cmlscratch/arjgpt27/projects/Oxford_dataset/stereo/centre/', help = "Path of the images")
 	parser.add_argument("--model", default = './model', help = "Path of the images")
 	Flags = parser.parse_args()
 
@@ -304,20 +315,37 @@ if __name__ == '__main__':
 
 	files = np.sort(glob.glob(os.path.join(Flags.input, '*png'), recursive=True))
 	fig = plt.figure()
+	fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 
 	for i in range(19, len(files) - 1):
 
 		print("Reading Frame ",i)
 		img1 = cv2.imread(files[i], 0)
+		color_image = cv2.cvtColor(img1, cv2.COLOR_BayerGR2BGR)
+		undistorted_image1 = UndistortImage(color_image, LUT)
+		img1 = cv2.cvtColor(undistorted_image1, cv2.COLOR_BGR2GRAY)
+
 		img2 = cv2.imread(files[i+1], 0)
+		color_image = cv2.cvtColor(img2, cv2.COLOR_BayerGR2BGR)
+		undistorted_image2 = UndistortImage(color_image, LUT)
+		img2 = cv2.cvtColor(undistorted_image2, cv2.COLOR_BGR2GRAY)
+
 		img1_feat = img1[200:650,:]
 		img2_feat = img2[200:650,:]
 
 		fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 
 		img1_points, img2_points = find_features(img1_feat, img2_feat)
-		F = fundamental_matrix_ransac(img1_points, img2_points)
+		print(img1_points.shape[0])
+		F, inliers1, inliers2 = fundamental_matrix_ransac(img1_points, img2_points)
+		img1_points = inliers1
+		img2_points = inliers2
+		print(img1_points.shape[0])
+		# print("Our calculation F: ", F)
 		F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
+		# print("Our calculation F: ", F)
+		# print("CV Calculation F_: ", F_)
+		# exit(-1)
 
 		# lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F)
 
@@ -342,7 +370,7 @@ if __name__ == '__main__':
 		if camera_pose_idx >= 0:
 
 			###############################################################
-			E_cv, mask = cv2.findEssentialMat(img1_points, img2_points, focal=fx, pp=(cx, cy), method=cv2.RANSAC, prob=0.99, threshold=0.05)
+			E_cv, mask = cv2.findEssentialMat(img1_points, img2_points, focal=fx, pp=(cx, cy), method=cv2.RANSAC)
 			_,R,t,_ = cv2.recoverPose(E_cv, img1_points, img2_points, intrinsic)
 			# current_pose = np.hstack((R, t))
 			###############################################################
@@ -359,4 +387,4 @@ if __name__ == '__main__':
 			prev_pose = prev_pose_homo[:3, :]
 
 			plt.scatter(new_x, -new_z, color='r')
-			plt.savefig("./plots/" + str(i) + ".png")
+			plt.savefig("./ransac_changed/" + str(i) + ".png")
