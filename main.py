@@ -2,11 +2,32 @@ import numpy as np
 import cv2
 import os
 import argparse
+import glob
+import math
+import matplotlib.pyplot as plt
 from ReadCameraModel import *
+
+def rotationMatrixToEulerAngles(R) :
+ 
+	sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+	singular = sy < 1e-6
+	if  not singular :
+		x = math.atan2(R[2,1] , R[2,2])
+		y = math.atan2(-R[2,0], sy)
+		z = math.atan2(R[1,0], R[0,0])
+	else :
+		x = math.atan2(-R[1,2], R[1,1])
+		y = math.atan2(-R[2,0], sy)
+		z = 0
+ 
+	return np.array([x*180/math.pi, y*180/math.pi, z*180/math.pi])
+
+def multiply_three(a, b, c):
+
+	return np.matmul(a, np.matmul(b, c))
 
 def find_f(img1_pts, img2_pts):
 
-	
 	M = np.array([[img1_pts[0,0]*img2_pts[0,0], img1_pts[0,0]*img2_pts[0,1], img1_pts[0,0], img1_pts[0,1]*img2_pts[0,0], img1_pts[0,1]*img2_pts[0,1], img1_pts[0,1], \
 				img2_pts[0,0], img2_pts[0,1], 1],\
 				[img1_pts[1,0]*img2_pts[1,0], img1_pts[1,0]*img2_pts[1,1], img1_pts[1,0], img1_pts[1,1]*img2_pts[1,0], img1_pts[1,1]*img2_pts[1,1], img1_pts[1,1], \
@@ -25,15 +46,12 @@ def find_f(img1_pts, img2_pts):
 				img2_pts[7,0], img2_pts[7,1], 1]])			
 	
 	U, S, Vh = np.linalg.svd(M, full_matrices=True)
+	F = np.reshape(Vh[-1, :], (3,3)).T
+	U, S, Vh = np.linalg.svd(F)
 	S[-1] = 0
 	S = np.diag(S)
-	z = np.zeros((8,1))
-	S = np.hstack((S,z))
-	M_ = np.matmul(U,np.matmul(S,Vh))
-	U, S, Vh = np.linalg.svd(M, full_matrices=True)
-	f = Vh[8,:]
-	f = f.reshape(3,3)
-	f = f/f[2,2]
+	f = multiply_three(U, S, Vh)
+	# f = f/f[2,2]
 
 	return f
 
@@ -69,35 +87,36 @@ def find_features_orb(img1, img2):
 		img1_points.append([int(x1), int(y1)])
 		img2_points.append([int(x2), int(y2)])
 
-	# img3 = cv2.drawMatches(img1,kp1,img2,kp2,matches[:10],None)
-	# cv2.imshow("img1", img3)
-	# cv2.waitKey(0)
-
 	return np.asarray(img1_points), np.asarray(img2_points)
 
 def find_features(img1, img2):
 
-	sift = cv2.xfeatures2d.SIFT_create()
-	kp1, des1 = sift.detectAndCompute(img1,None)
-	kp2, des2 = sift.detectAndCompute(img2,None)
-	bf = cv2.BFMatcher()
-	matches = bf.knnMatch(des1, des2, k=2)
-	good = []
-	img1_points = []
-	img2_points = []
-	for m1, m2 in matches:
-		if m1.distance < 0.7 * m2.distance:
-			im1_idx = m1.queryIdx
-			im2_idx = m1.trainIdx
-			[x1,y1] = kp1[im1_idx].pt
-			[x2,y2] = kp2[im2_idx].pt
-			img1_points.append([int(x1), int(y1)])
-			img2_points.append([int(x2), int(y2)])
-			good.append([m1])
+	sift = cv2.xfeatures2d.SIFT_create() 
 
-	return np.asarray(img1_points), np.asarray(img2_points)
+    # find the keypoints and descriptors with SIFT in current as well as next frame
+	kp1, des1 = sift.detectAndCompute(img1, None)
+	kp2, des2 = sift.detectAndCompute(img2, None)
 
-def drawlines(img1, img2, lines, pts1, pts2):
+	# FLANN parameters
+	FLANN_INDEX_KDTREE = 0
+	index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+	search_params = dict(checks=50)
+
+	flann = cv2.FlannBasedMatcher(index_params,search_params)
+	matches = flann.knnMatch(des1,des2,k=2)
+	
+	features1 = [] # Variable for storing all the required features from the current frame
+	features2 = [] # Variable for storing all the required features from the next frame
+
+	# Ratio test as per Lowe's paper
+	for i,(m,n) in enumerate(matches):
+		if m.distance < 0.5*n.distance:
+			features1.append(kp1[m.queryIdx].pt)
+			features2.append(kp2[m.trainIdx].pt)
+
+	return np.asarray(features1), np.asarray(features2)
+
+def drawlines(img1, img2, lines, pts1, pts2, index):
     ''' img1 - image on which we draw the epilines for the points in img2
         lines - corresponding epilines '''
     r,c = img1.shape
@@ -110,82 +129,85 @@ def drawlines(img1, img2, lines, pts1, pts2):
         img1 = cv2.line(img1, (x0,y0), (x1,y1), color,1)
         img1 = cv2.circle(img1,tuple(pt1),5,color,-1)
         img2 = cv2.circle(img2,tuple(pt2),5,color,-1)
-    # cv2.imshow("img1", img1)
-    # cv2.imwrite("./report_images/removing_car.png", img1)
-    # cv2.imshow("img2", img2)
-    # cv2.waitKey(0)
-    # return img1,img2
+    
+    cv2.imshow("img1", img1)
+    cv2.imshow("img2", img2)
+    cv2.waitKey(0)
+    return img1,img2
 
 def find_essential_matrix(intr, F):
+
 	E = np.matmul(intr.T,np.matmul(F,intr))
 	U, S, Vh = np.linalg.svd(E)
-	S[-1] = 0
+	S[0] = 1
+	S[1] = 1
+	S[2] = 0
 	S = np.diag(S)
 	E = np.matmul(U, np.matmul(S, Vh))
 
 	return E
 
-def multiply_three(a, b, c):
+def homogenous_matrix(mat):
 
-	return np.matmul(a, np.matmul(b, c))
+	T = mat[:,-1, np.newaxis]
+	R = mat[:, :3]
+	# T = np.matmul(R, T)
+	mat = np.hstack((R, T))
+
+	return mat
 
 def disambiguate_camera_pose(poses, world_points):
 
 	count = np.zeros((4,1))
 
 	for j in range(len(poses)):
+
 		pose = poses[j]
-		points = world_points[:3, :, j]
-		r3 = pose[2, :3]
-		C = np.reshape(pose[:, 3], (3,1))
-		result = np.matmul(r3, (points - C))
-		inds = np.where(result > 0)
-		count[j] = len(inds[0])
+		angles = rotationMatrixToEulerAngles(pose[:,:3])
+		if angles[0] < 50 and angles[0] > -50 and angles[2] < 50 and angles[2] > -50:
+			points = world_points[:3, :, j]
+			r3 = pose[2, :3, np.newaxis]
+			C = np.reshape(pose[:, 3], (3,1))
+			result = np.matmul(r3.T, (points - C))
+			inds = np.where(result > 0)
+			count[j] = len(inds[0])
 
 	if np.max(count) > 0:
 		return np.argmax(count)
 	else:
 		return -1
 
-def homogenous_matrix(mat):
 
-	T = mat[:,-1, np.newaxis]
-	R = mat[:, :3]
-	T = np.matmul(R, T)
-	mat = np.hstack((R, T))
+def skew(vec):
 
-	return mat
+	return np.array([[0, -vec[2], vec[1]],
+					 [vec[2], 0, -vec[0]],
+					 [-vec[1], vec[0], 0]], dtype=np.float32)
 
-
-def linear_triangulation(intrinsic, poses, pts1, pts2):
-
-	world = np.array([[1, 0, 0, 0],
-					  [0, 1, 0, 0],
-					  [0, 0, 1, 0]], dtype = np.float32)
-
-	world = np.matmul(intrinsic, world)
-	world = homogenous_matrix(world)
+def linear_triangulation(world, intrinsic, poses, pts1, pts2):
 
 	world_points = np.zeros((4, pts1.shape[0], len(poses)))
 
 	for j in range(len(poses)):
-		pose = np.matmul(intrinsic, poses[j])
-		pose = homogenous_matrix(pose)
+
+		pose = homogenous_matrix(poses[j])
+
 		for i in range(pts1.shape[0]):
 
-			x1 = pts1[i][0]
-			y1 = pts1[i][1]
-			x2 = pts2[i][0]
-			y2 = pts2[i][1]
+				x1 = pts1[i][0]
+				y1 = pts1[i][1]
+				x2 = pts2[i][0]
+				y2 = pts2[i][1]
 
-			M = np.array([y1*world[2] - world[1],
-						  world[0] - x1*world[2],
-						  y2*pose[2] - pose[1],
-						  pose[0] - x2*pose[2]])
-
-
-			U, S, Vh = np.linalg.svd(M, full_matrices = True)
-			world_points[:, i, j] = Vh[-1]/Vh[-1][-1]
+				# http://www.cs.cmu.edu/~16385/s17/Slides/11.4_Triangulation.pdf
+				p1 = skew(np.array([[x1], [y1], [1]]))
+				p2 = skew(np.array([[x2], [y2], [1]]))
+				pose1 = np.matmul(p1, world)
+				pose2 = np.matmul(p2, pose)
+				M = np.vstack((pose1, pose2))
+				# M = np.vstack((world, pose))
+				U, S, Vh = np.linalg.svd(M, full_matrices = True)
+				world_points[:, i, j] = Vh[-1]/Vh[-1][-1]
 
 	return world_points
 
@@ -198,8 +220,8 @@ def estimate_camera_pose(E):
 	U3 = np.reshape(U3, (3,1))
 
 	C1 = U3.copy()
-	R1 = multiply_three(U, W, Vh)
-
+	# print(U, Vh)
+	R1 = U @ W @ Vh #multiply_three(U, W, Vh)
 	if np.linalg.det(R1) < 0:
 		R1 = -R1
 		C1 = -C1
@@ -238,9 +260,9 @@ def estimate_camera_pose(E):
 
 def fundamental_matrix_ransac(img1_points, img2_points):
 
-	max_iter = 4000
-	threshold = 60
-	diff = np.array([[643.788025, 484.40799]])
+	max_iter = 50
+	threshold = 0.01
+	min_inliers = 0
 	pts1 = img1_points.copy()
 	pts2 = img2_points.copy()
 	ones = np.ones((img1_points.shape[0], 1))
@@ -255,14 +277,12 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 
 		index = np.random.choice(all_index, 8, replace=False)
 		F = find_f(img1_points[index], img2_points[index])
-		error = np.matmul(np.matmul(pts2, F), pts1.T)
+		error = np.abs(np.diag(np.matmul(np.matmul(pts2, F), pts1.T)))
+		inds = np.where(error < threshold)
 
-		if np.abs(np.sum(error)) < min_error:
-			min_error = np.abs(np.sum(error))
+		if len(inds[0]) > min_inliers:
+			min_inliers = len(inds[0])
 			best_F = F
-			# print(min_error)
-
-		max_iter += 1
 
 	return best_F
 
@@ -274,39 +294,69 @@ if __name__ == '__main__':
 	parser.add_argument("--model", default = './model', help = "Path of the images")
 	Flags = parser.parse_args()
 
-	correct_pose = np.array([[1, 0, 0, 0],
+	prev_pose = np.array([[1, 0, 0, 0],
 				  [0, 1, 0, 0],
 				  [0, 0, 1, 0]], dtype = np.float32)
 
-	img1 = cv2.imread('./data/1399381497885112.png', 0)
-	img2 = cv2.imread('./data/1399381498322587.png', 0)
-	img1_feat = img1[:756,:]
-	img2_feat = img2[:756,:]
+	init_world = np.array([[1, 0, 0, 0],
+				  [0, 1, 0, 0],
+				  [0, 0, 1, 0]], dtype = np.float32)
 
-	fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
+	files = np.sort(glob.glob(os.path.join(Flags.input, '*png'), recursive=True))
+	fig = plt.figure()
 
-	img1_points, img2_points = find_features(img1_feat, img2_feat)
-	F = fundamental_matrix_ransac(img1_points, img2_points)
+	for i in range(19, len(files) - 1):
 
-	F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
-	# print(F, F_)
+		print("Reading Frame ",i)
+		img1 = cv2.imread(files[i], 0)
+		img2 = cv2.imread(files[i+1], 0)
+		img1_feat = img1[200:650,:]
+		img2_feat = img2[200:650,:]
 
-	lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F)
-	lines1 = lines1.reshape(-1,3)
+		fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 
-	lines2 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F_)
-	lines2 = lines1.reshape(-1,3)
-	drawlines(img1.copy(), img2.copy(), lines1, img1_points, img2_points)
-	drawlines(img1, img2, lines2, img1_points, img2_points)
-	intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
-	# print(intrinsic)
-	E = find_essential_matrix(intrinsic, F)
-	poses = estimate_camera_pose(E)
-	world_points = linear_triangulation(intrinsic, poses, img1_points, img2_points)
-	camera_pose_idx = disambiguate_camera_pose(poses, world_points)
+		img1_points, img2_points = find_features(img1_feat, img2_feat)
+		F = fundamental_matrix_ransac(img1_points, img2_points)
+		F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
 
-	if camera_pose_idx >= 0:
-		correct_pose = poses[camera_pose_idx]
-		correct_pose = homogenous_matrix(correct_pose)
-		
+		# lines1 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F)
 
+		# lines1 = lines1.reshape(-1,3)
+
+		# lines2 = cv2.computeCorrespondEpilines(img2_points.reshape(-1,1,2), 2, F_)
+		# lines2 = lines1.reshape(-1,3)
+		# drawlines(img1.copy(), img2.copy(), lines1, img1_points, img2_points, '1')
+		# drawlines(img1, img2, lines2, img1_points, img2_points, '3')
+		# continue
+
+		intrinsic = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])
+		# print(intrinsic)
+		E = find_essential_matrix(intrinsic, F)
+		# print("Our essential E: ", E)
+		poses = estimate_camera_pose(E)
+		world_points = linear_triangulation(init_world, intrinsic, poses, img1_points, img2_points)
+		camera_pose_idx = disambiguate_camera_pose(poses, world_points)
+
+		old_x, old_y, old_z = prev_pose[:,3]
+
+		if camera_pose_idx >= 0:
+
+			###############################################################
+			E_cv, mask = cv2.findEssentialMat(img1_points, img2_points, focal=fx, pp=(cx, cy), method=cv2.RANSAC, prob=0.99, threshold=0.05)
+			_,R,t,_ = cv2.recoverPose(E_cv, img1_points, img2_points, intrinsic)
+			# current_pose = np.hstack((R, t))
+			###############################################################
+
+			current_pose = poses[camera_pose_idx]
+			if current_pose[2, 3] > 0:
+				current_pose[2, 3] = -current_pose[2, 3]
+			# current_pose = homogenous_matrix(current_pose)
+			curr_pose_homo = np.vstack((current_pose, [0,0,0,1]))
+			prev_pose_homo = np.vstack((prev_pose, [0,0,0,1]))
+			prev_pose_homo = np.matmul(prev_pose_homo, curr_pose_homo)
+
+			new_x, new_y, new_z = prev_pose_homo[:3, 3]
+			prev_pose = prev_pose_homo[:3, :]
+
+			plt.scatter(new_x, -new_z, color='r')
+			plt.savefig("./plots/" + str(i) + ".png")
