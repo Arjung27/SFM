@@ -273,7 +273,7 @@ def fundamental_matrix_ransac(img1_points, img2_points):
 	all_index = np.arange(0, img1_points.shape[0])
 	min_error = 10000000
 	best_F = []
-	np.random.seed(40)
+	np.random.seed(30)
 
 	# while (min_inliers/img1_points.shape[0]) < 0.2:
 	for i in range(max_iter):
@@ -303,9 +303,14 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--input", default = '/cmlscratch/arjgpt27/projects/Oxford_dataset/stereo/centre/', help = "Path of the images")
 	parser.add_argument("--model", default = './model', help = "Path of the images")
+	parser.add_argument("--output", default = './plots_our_code_test_seed_30_modified/', help = "Path to store the images")
 	Flags = parser.parse_args()
 
 	prev_pose = np.array([[1, 0, 0, 0],
+				  [0, 1, 0, 0],
+				  [0, 0, 1, 0]], dtype = np.float32)
+
+	prev_pose_cv = np.array([[1, 0, 0, 0],
 				  [0, 1, 0, 0],
 				  [0, 0, 1, 0]], dtype = np.float32)
 
@@ -316,8 +321,9 @@ if __name__ == '__main__':
 	files = np.sort(glob.glob(os.path.join(Flags.input, '*png'), recursive=True))
 	fig = plt.figure()
 	fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
+	error = []
 
-	for i in range(19, len(files) - 1):
+	for i in range(0, len(files) - 1):
 
 		print("Reading Frame ",i)
 		img1 = cv2.imread(files[i], 0)
@@ -336,13 +342,12 @@ if __name__ == '__main__':
 		fx, fy, cx, cy, G_camera_image, LUT = ReadCameraModel(Flags.model)
 
 		img1_points, img2_points = find_features(img1_feat, img2_feat)
-		print(img1_points.shape[0])
+
 		F, inliers1, inliers2 = fundamental_matrix_ransac(img1_points, img2_points)
 		img1_points = inliers1
 		img2_points = inliers2
-		print(img1_points.shape[0])
 		# print("Our calculation F: ", F)
-		F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
+		# F_, _ = cv2.findFundamentalMat(np.float32(img1_points), np.float32(img2_points), method=cv2.FM_RANSAC)
 		# print("Our calculation F: ", F)
 		# print("CV Calculation F_: ", F_)
 		# exit(-1)
@@ -365,20 +370,13 @@ if __name__ == '__main__':
 		world_points = linear_triangulation(init_world, intrinsic, poses, img1_points, img2_points)
 		camera_pose_idx = disambiguate_camera_pose(poses, world_points)
 
-		old_x, old_y, old_z = prev_pose[:,3]
-
 		if camera_pose_idx >= 0:
 
-			###############################################################
-			E_cv, mask = cv2.findEssentialMat(img1_points, img2_points, focal=fx, pp=(cx, cy), method=cv2.RANSAC)
-			_,R,t,_ = cv2.recoverPose(E_cv, img1_points, img2_points, intrinsic)
-			# current_pose = np.hstack((R, t))
-			###############################################################
-
 			current_pose = poses[camera_pose_idx]
+
 			if current_pose[2, 3] > 0:
-				current_pose[2, 3] = -current_pose[2, 3]
-			# current_pose = homogenous_matrix(current_pose)
+				current_pose[:, 3] = -current_pose[:, 3]
+
 			curr_pose_homo = np.vstack((current_pose, [0,0,0,1]))
 			prev_pose_homo = np.vstack((prev_pose, [0,0,0,1]))
 			prev_pose_homo = np.matmul(prev_pose_homo, curr_pose_homo)
@@ -386,5 +384,8 @@ if __name__ == '__main__':
 			new_x, new_y, new_z = prev_pose_homo[:3, 3]
 			prev_pose = prev_pose_homo[:3, :]
 
-			plt.scatter(new_x, -new_z, color='r')
-			plt.savefig("./ransac_changed/" + str(i) + ".png")
+			plt.scatter(new_x, -new_z, color='g')
+			plt.savefig(Flags.output + str(i) + ".png")
+
+
+	print(new_x, new_y, new_z)
